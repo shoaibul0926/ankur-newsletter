@@ -406,11 +406,16 @@ function wireDropzone(zoneId, inputId, labelId) {
 wireDropzone('deckZone', 'deckInput', 'deckFileName');
 wireDropzone('photoZone', 'photoInput', 'photoFileName');
 
-// -- live highlight for the selected style card --
+// -- style picker saves itself immediately on click, no separate "Save"
+// step to forget. Previously the style only took effect after a manual
+// "Save masthead" click, so picking a style and going straight to
+// "Generate PDF" silently kept the old style -- looked like every style
+// produced the same PDF.
 document.querySelectorAll('.style-card input').forEach(radio => {
   radio.addEventListener('change', () => {
     document.querySelectorAll('.style-card').forEach(c => c.classList.remove('checked'));
     radio.closest('.style-card').classList.add('checked');
+    radio.form.requestSubmit();
   });
 });
 
