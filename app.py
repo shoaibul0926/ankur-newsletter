@@ -19,12 +19,13 @@ import shutil
 import uuid
 from pathlib import Path
 
-from flask import Flask, abort, redirect, render_template, request, send_file, url_for
+from flask import Flask, abort, flash, redirect, render_template, request, send_file, url_for
 
 from extract import extract_deck, write_stories
-from generate import BASE_DIR, load_stories, render_pdf
+from generate import BASE_DIR, find_bare_photo_stories, load_stories, render_pdf
 
 app = Flask(__name__)
+app.secret_key = "ankur-newsletter-builder-local-only"  # flash messages only; no auth, local tool
 
 STORIES_DIR = BASE_DIR / "stories"
 OUTPUT_DIR = BASE_DIR / "output"
@@ -63,7 +64,10 @@ def list_story_cards():
 
 @app.route("/")
 def index():
-    return render_template("index.html", config=load_config(), stories=list_story_cards())
+    stories = load_stories(STORIES_DIR)
+    bare_photo_headings = find_bare_photo_stories(stories)
+    return render_template("index.html", config=load_config(), stories=list_story_cards(),
+                            bare_photo_headings=bare_photo_headings)
 
 
 @app.route("/photo/<path:relpath>")
@@ -81,6 +85,7 @@ def update_config():
     config["title_big"] = request.form.get("title_big", "").strip() or "NEWSLETTER"
     config["date_range"] = request.form.get("date_range", "").strip()
     save_config(config)
+    flash("Masthead saved.", "success")
     return redirect(url_for("index"))
 
 
@@ -101,8 +106,17 @@ def add_story():
             f.save(dest)
             images.append(dest)
 
+    if images and not note:
+        if session_dir.exists():
+            shutil.rmtree(session_dir, ignore_errors=True)
+        flash("Every photo needs an article explaining it — add a note before submitting.", "error")
+        return redirect(url_for("index"))
+
     if heading or note or images:
         write_stories([{"heading": heading, "note": note, "images": images}], STORIES_DIR, "story")
+        flash(f"Added “{heading or '(no heading)'}”.", "success")
+    else:
+        flash("Nothing to add — fill in a heading, note, or photo first.", "error")
 
     if session_dir.exists():
         shutil.rmtree(session_dir, ignore_errors=True)
@@ -114,10 +128,12 @@ def add_story():
 def upload_deck():
     f = request.files.get("deck")
     if not f or not f.filename:
-        abort(400, "No file uploaded.")
+        flash("No file uploaded.", "error")
+        return redirect(url_for("index"))
     ext = Path(f.filename).suffix.lower()
     if ext not in DECK_EXTS:
-        abort(400, "Please upload a .pptx, .pdf, or .docx file.")
+        flash("Please upload a .pptx, .pdf, or .docx file.", "error")
+        return redirect(url_for("index"))
 
     session_dir = UPLOAD_TMP / uuid.uuid4().hex[:10]
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -127,10 +143,16 @@ def upload_deck():
     try:
         slides = extract_deck(src_path, session_dir / "images")
     except Exception as e:
-        abort(400, f"Could not read that file: {e}")
+        shutil.rmtree(session_dir, ignore_errors=True)
+        flash(f"Could not read that file: {e}", "error")
+        return redirect(url_for("index"))
 
     if slides:
         write_stories(slides, STORIES_DIR, Path(f.filename).stem)
+        flash(f"Extracted {len(slides)} stor{'y' if len(slides) == 1 else 'ies'} from {f.filename}. "
+              f"Review each note before generating.", "success")
+    else:
+        flash(f"No slides/pages with text or photos were found in {f.filename}.", "error")
 
     shutil.rmtree(session_dir, ignore_errors=True)
     return redirect(url_for("index"))
@@ -143,6 +165,7 @@ def delete_story(name):
     folder = (STORIES_DIR / name).resolve()
     if folder.is_relative_to(STORIES_DIR.resolve()) and folder.is_dir():
         shutil.rmtree(folder)
+        flash("Story removed.", "success")
     return redirect(url_for("index"))
 
 

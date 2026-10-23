@@ -274,10 +274,13 @@ def main():
     print(f"Extracted {len(slides)} slide(s)/page(s) from {deck_path.name} into:")
     for folder in written:
         heading = (folder / "heading.txt").read_text(encoding="utf-8").strip()
+        note = (folder / "note.txt").read_text(encoding="utf-8").strip()
         n_photos = len(list((folder / "photos").glob("*"))) if (folder / "photos").exists() else 0
-        print(f"  {folder.relative_to(BASE_DIR)}  —  \"{heading or '(no heading)'}\"  ({n_photos} photo(s))")
+        flag = "  <-- NEEDS A CAPTION (has photos, no note)" if n_photos and not note else ""
+        print(f"  {folder.relative_to(BASE_DIR)}  —  \"{heading or '(no heading)'}\"  ({n_photos} photo(s)){flag}")
     print("\nReview/trim each note.txt down to just the main point before running generate.py —")
-    print("extraction pulls the raw slide text as-is, it doesn't shorten it for you.")
+    print("extraction pulls the raw slide text as-is, it doesn't shorten it for you. Every photo")
+    print("needs a caption explaining it — write one for any story flagged above.")
 
 
 if __name__ == "__main__":

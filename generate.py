@@ -62,13 +62,13 @@ COVER_TOP = 150
 INNER_TOP = 60
 
 CREAM = (245 / 255, 245 / 255, 232 / 255)
-GREEN = (46 / 255, 92 / 255, 51 / 255)
-GOLD = (212 / 255, 168 / 255, 32 / 255)
+GREEN = (46 / 255, 100 / 255, 23 / 255)   # matches the real newsletter's block color exactly
+GOLD = (255 / 255, 222 / 255, 88 / 255)   # matches the real newsletter's headline gold exactly
 WHITE = (1, 1, 1)
 BLACK = (0.07, 0.07, 0.07)
 
 BLOCK_PAD = 14
-BLOCK_RADIUS = 8
+BLOCK_RADIUS = 0  # the real newsletter uses sharp, square-cornered blocks
 PHOTO_GAP = 6
 BLOCK_GAP = 16
 
@@ -94,7 +94,7 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-GOLD_HEX = "#D4A820"
+GOLD_HEX = "#FFDE58"
 _MARKUP_RE = re.compile(r"\*\*(.+?)\*\*|\+\+(.+?)\+\+")
 
 
@@ -404,8 +404,24 @@ def load_stories(stories_dir: Path):
     return stories
 
 
+def find_bare_photo_stories(stories: list) -> list:
+    """Every photo (or photo group) in the real newsletter is paired with an
+    article explaining it — a block is never just bare photos. Return the
+    headings of any story that breaks that rule (has photos but no note),
+    so callers can warn instead of silently publishing an uncaptioned block.
+    """
+    return [heading or "(no heading)" for heading, note, photos in stories if photos and not note.strip()]
+
+
 def render_pdf(config: dict, stories: list, output_path: Path) -> Path:
     """stories: list of (heading, note, photo_paths)."""
+    bare = find_bare_photo_stories(stories)
+    if bare:
+        print("WARNING: these stories have photos but no article text — every photo needs a "
+              "caption explaining it, write one in note.txt before this goes out:")
+        for heading in bare:
+            print(f"  - {heading}")
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
