@@ -318,7 +318,7 @@
         <span id="deckFileName">.pptx, .pdf, or .docx</span>
         <input type="file" name="deck" id="deckInput" accept=".pptx,.pdf,.docx" required>
       </div>
-      <p class="hint">Pulls one story per slide/page/heading. Review and trim the notes afterwards — this only extracts, it doesn't shorten anything for you.</p>
+      <p class="hint">Pulls one story per slide/page/heading and AI-condenses each into a short article (needs ANTHROPIC_API_KEY set — raw text otherwise). Skim the results before generating.</p>
       <button type="submit" class="btn-primary">Extract stories</button>
     </form>
   </section>

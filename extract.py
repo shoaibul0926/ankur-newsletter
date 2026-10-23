@@ -6,12 +6,14 @@ Pulls a heading, note text, and photos out of each slide (.pptx), page
 them into stories/NN-.../ folders in the exact format generate.py already
 reads (heading.txt, note.txt, photos/).
 
-This is a MECHANICAL extraction step only — it faithfully pulls whatever
-text and photos are on the slide/page. It does NOT trim verbose slide text
-down to "just the main point" (that's an editorial judgment call, not a
-layout one) — review the extracted note.txt files afterwards and shorten
-them before running generate.py, the same way Ankur's real newsletter only
-keeps the headline fact per story rather than the full raw slide content.
+Pulling the raw text/photos off the slide is mechanical, but the note
+text itself is then condensed by summarize.condense_article() into a
+short article (1-2 sentences, one highlighted fact) the same way a human
+editor would trim it — never a full raw dump. That step needs
+ANTHROPIC_API_KEY set (see .env.example); without it, the raw extracted
+text is kept as-is and a note is printed, so extraction still works.
+A slide with photos and no text at all has nothing to condense — that's
+flagged (NEEDS A CAPTION, below) rather than invented from nothing.
 
 Usage:
     python extract.py path/to/deck.pptx
@@ -28,6 +30,8 @@ import sys
 from pathlib import Path
 
 from PIL import Image
+
+from summarize import condense_article
 
 BASE_DIR = Path(__file__).resolve().parent
 MIN_IMAGE_SIDE = 150  # px; filters out small logos/icons/bullet graphics
@@ -207,12 +211,19 @@ def extract_docx(path: Path, img_out_dir: Path) -> list[dict]:
 def extract_deck(path: Path, img_out_dir: Path) -> list[dict]:
     ext = path.suffix.lower()
     if ext == ".pptx":
-        return extract_pptx(path, img_out_dir)
-    if ext == ".pdf":
-        return extract_pdf(path, img_out_dir)
-    if ext == ".docx":
-        return extract_docx(path, img_out_dir)
-    raise ValueError(f"Unsupported file type: {ext} (expected .pptx, .pdf, or .docx)")
+        results = extract_pptx(path, img_out_dir)
+    elif ext == ".pdf":
+        results = extract_pdf(path, img_out_dir)
+    elif ext == ".docx":
+        results = extract_docx(path, img_out_dir)
+    else:
+        raise ValueError(f"Unsupported file type: {ext} (expected .pptx, .pdf, or .docx)")
+
+    for slide in results:
+        if slide["note"]:
+            slide["note"] = condense_article(slide["heading"], slide["note"])
+
+    return results
 
 
 def _next_story_index(stories_dir: Path) -> int:
@@ -278,9 +289,9 @@ def main():
         n_photos = len(list((folder / "photos").glob("*"))) if (folder / "photos").exists() else 0
         flag = "  <-- NEEDS A CAPTION (has photos, no note)" if n_photos and not note else ""
         print(f"  {folder.relative_to(BASE_DIR)}  —  \"{heading or '(no heading)'}\"  ({n_photos} photo(s)){flag}")
-    print("\nReview/trim each note.txt down to just the main point before running generate.py —")
-    print("extraction pulls the raw slide text as-is, it doesn't shorten it for you. Every photo")
-    print("needs a caption explaining it — write one for any story flagged above.")
+    print("\nNotes above were AI-condensed into short articles where ANTHROPIC_API_KEY is set "
+          "(raw text otherwise) — skim them before running generate.py. Every photo needs a "
+          "caption explaining it; write one for any story flagged above.")
 
 
 if __name__ == "__main__":

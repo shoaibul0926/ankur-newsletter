@@ -115,15 +115,13 @@ def add_story():
             f.save(dest)
             images.append(dest)
 
-    if images and not note:
-        if session_dir.exists():
-            shutil.rmtree(session_dir, ignore_errors=True)
-        flash("Every photo needs an article explaining it — add a note before submitting.", "error")
-        return redirect(url_for("index"))
-
     if heading or note or images:
         write_stories([{"heading": heading, "note": note, "images": images}], STORIES_DIR, "story")
-        flash(f"Added “{heading or '(no heading)'}”.", "success")
+        if images and not note:
+            flash(f"Added “{heading or '(no heading)'}” — but it has photos and no "
+                  f"article yet. Write a caption for it before generating.", "error")
+        else:
+            flash(f"Added “{heading or '(no heading)'}”.", "success")
     else:
         flash("Nothing to add — fill in a heading, note, or photo first.", "error")
 
@@ -158,10 +156,17 @@ def upload_deck():
 
     if slides:
         write_stories(slides, STORIES_DIR, Path(f.filename).stem)
-        flash(f"Extracted {len(slides)} stor{'y' if len(slides) == 1 else 'ies'} from {f.filename}. "
-              f"Review each note before generating.", "success")
+        no_article = [s["heading"] or "(no heading)" for s in slides if s["images"] and not s["note"]]
+        if no_article:
+            flash(f"Extracted {len(slides)} stor{'y' if len(slides) == 1 else 'ies'} from {f.filename} — "
+                  f"but {f.filename} has no article text for {len(no_article)} of them "
+                  f"({', '.join(no_article[:3])}{', ...' if len(no_article) > 3 else ''}). "
+                  f"Write captions for those before generating.", "error")
+        else:
+            flash(f"Extracted {len(slides)} stor{'y' if len(slides) == 1 else 'ies'} from {f.filename}. "
+                  f"Review each note before generating.", "success")
     else:
-        flash(f"No slides/pages with text or photos were found in {f.filename}.", "error")
+        flash(f"{f.filename} doesn't have any article text or photos in it — nothing to extract.", "error")
 
     shutil.rmtree(session_dir, ignore_errors=True)
     return redirect(url_for("index"))
@@ -185,7 +190,14 @@ def generate():
         abort(400, "No stories yet — add one by hand or upload a deck first.")
     output_path = OUTPUT_DIR / "newsletter.pdf"
     render_pdf(load_config(), stories, output_path)
-    return send_file(output_path, mimetype="application/pdf", as_attachment=False, download_name="newsletter.pdf")
+    response = send_file(output_path, mimetype="application/pdf", as_attachment=False,
+                          download_name="newsletter.pdf")
+    # This same URL serves a freshly-regenerated file every time (e.g. after
+    # switching styles) — without this, browsers/PDF viewers can silently
+    # keep showing a cached response from an earlier style.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 if __name__ == "__main__":

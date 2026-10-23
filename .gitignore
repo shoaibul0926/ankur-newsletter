@@ -6,3 +6,4 @@ app_log.txt
 *.pptx
 *.docx
 output/*.pdf
+.env
