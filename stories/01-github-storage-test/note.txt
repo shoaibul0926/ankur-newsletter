@@ -1,1 +1,0 @@
-Confirming ++writes++ actually persist via the GitHub API.
