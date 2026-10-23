@@ -1,1 +1,0 @@
-Testing photo upload via GitHub API.
