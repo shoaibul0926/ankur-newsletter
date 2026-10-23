@@ -23,6 +23,7 @@ from flask import Flask, abort, flash, redirect, render_template, request, send_
 
 from extract import extract_deck, write_stories
 from generate import BASE_DIR, find_bare_photo_stories, load_stories, render_pdf
+from styles import DEFAULT_STYLE_ID, STYLES
 
 app = Flask(__name__)
 app.secret_key = "ankur-newsletter-builder-local-only"  # flash messages only; no auth, local tool
@@ -38,8 +39,11 @@ DECK_EXTS = {".pptx", ".pdf", ".docx"}
 
 def load_config() -> dict:
     if CONFIG_PATH.exists():
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    return {"org_small": "ANKUR", "title_big": "NEWSLETTER", "date_range": "", "output_file": "output/newsletter.pdf"}
+        config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    else:
+        config = {"org_small": "ANKUR", "title_big": "NEWSLETTER", "date_range": "", "output_file": "output/newsletter.pdf"}
+    config.setdefault("style", DEFAULT_STYLE_ID)
+    return config
 
 
 def save_config(config: dict) -> None:
@@ -69,7 +73,8 @@ def index():
     cards = list_story_cards()
     total_photos = sum(len(c["photo_urls"]) for c in cards)
     return render_template("index.html", config=load_config(), stories=cards,
-                            bare_photo_headings=bare_photo_headings, total_photos=total_photos)
+                            bare_photo_headings=bare_photo_headings, total_photos=total_photos,
+                            available_styles=STYLES)
 
 
 @app.route("/photo/<path:relpath>")
@@ -86,6 +91,8 @@ def update_config():
     config["org_small"] = request.form.get("org_small", "").strip() or "ANKUR"
     config["title_big"] = request.form.get("title_big", "").strip() or "NEWSLETTER"
     config["date_range"] = request.form.get("date_range", "").strip()
+    style_id = request.form.get("style", "")
+    config["style"] = style_id if style_id in STYLES else DEFAULT_STYLE_ID
     save_config(config)
     flash("Masthead saved.", "success")
     return redirect(url_for("index"))

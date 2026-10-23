@@ -1,10 +1,13 @@
 """
-Ankur newsletter PDF generator — Phase 1.
+Ankur newsletter PDF generator.
 
-Renders a PDF that matches the real Ankur newsletter template: cream page,
-dark-green rounded story blocks, gold headline, auto photo grid, white body
-text with just the main point of each paragraph bolded (not the whole
-paragraph — mirrors how the real newsletters read).
+Renders a PDF from stories (heading + note + photos) in a chosen visual
+style — see styles.py for the style registry. "ankur-classic" matches the
+real Ankur newsletter exactly: cream page, dark-green blocks, gold
+headline, auto photo grid, white body text with just the main point of
+each paragraph bolded (not the whole paragraph — mirrors how the real
+newsletters read). Other styles reuse the same layout engine with
+different colors/fonts/block shapes — see styles.py to add more.
 
 Input: a list of stories, each (heading, note, photo_paths). See
 stories/01-example-story/ for the on-disk format (heading.txt, note.txt,
@@ -13,19 +16,20 @@ photos/).
 In note.txt: a blank line starts a new paragraph. Mark up at most the one
 or two things that should stand out, same as the real newsletter does —
 everything else should stay plain:
-    ++Mr. Ashok Bildikar++   -> bold, gold highlight (names, awards, dates)
-    **word**                 -> bold, same white as the rest of the text
+    ++Mr. Ashok Bildikar++   -> bold, highlight color (names, awards, dates)
+    **word**                 -> bold, same color as the rest of the text
 Leave a paragraph with no markup at all and its lead sentence is
-auto-bolded in white, so nothing ever reads as a flat wall of text.
+auto-bolded, so nothing ever reads as a flat wall of text.
 
 Usage:
     python generate.py [issue.json]
 
-issue.json controls the cover/header text:
+issue.json controls the cover/header text and chosen style:
     {
       "org_small": "ANKUR",
       "title_big": "NEWSLETTER",
       "date_range": "JANUARY - MARCH 2026",
+      "style": "ankur-classic",
       "output_file": "output/newsletter.pdf"
     }
 """
@@ -51,6 +55,8 @@ from reportlab.platypus import (
     Spacer,
 )
 
+from styles import DEFAULT_STYLE_ID, get_style
+
 BASE_DIR = Path(__file__).resolve().parent
 CACHE_DIR = BASE_DIR / ".image_cache"
 
@@ -58,28 +64,29 @@ PAGE_W, PAGE_H = A4
 MARGIN_L = 38
 MARGIN_R = 38
 MARGIN_BOTTOM = 65
-COVER_TOP = 150
 INNER_TOP = 60
 
-CREAM = (245 / 255, 245 / 255, 232 / 255)
-GREEN = (46 / 255, 100 / 255, 23 / 255)   # matches the real newsletter's block color exactly
-GOLD = (255 / 255, 222 / 255, 88 / 255)   # matches the real newsletter's headline gold exactly
-WHITE = (1, 1, 1)
-BLACK = (0.07, 0.07, 0.07)
-
 BLOCK_PAD = 14
-BLOCK_RADIUS = 0  # the real newsletter uses sharp, square-cornered blocks
 PHOTO_GAP = 6
 BLOCK_GAP = 16
 
-COVER_FRAME_H = PAGE_H - COVER_TOP - MARGIN_BOTTOM
-INNER_FRAME_H = PAGE_H - INNER_TOP - MARGIN_BOTTOM
+
+def _cover_top(style: dict) -> float:
+    return style.get("cover_top", 150)
 
 
-def _is_fresh_page(avail_h: float) -> bool:
+def _frame_heights(style: dict):
+    cover_h = PAGE_H - _cover_top(style) - MARGIN_BOTTOM
+    inner_h = PAGE_H - INNER_TOP - MARGIN_BOTTOM
+    return cover_h, inner_h
+
+
+def _is_fresh_page(avail_h: float, style: dict) -> bool:
     """True when avail_h is a full, empty frame (cover or inner page) rather
     than whatever's left over after earlier content on the same page."""
-    return abs(avail_h - COVER_FRAME_H) < 1.0 or abs(avail_h - INNER_FRAME_H) < 1.0
+    cover_h, inner_h = _frame_heights(style)
+    return abs(avail_h - cover_h) < 1.0 or abs(avail_h - inner_h) < 1.0
+
 
 # --- text helpers -----------------------------------------------------
 
@@ -94,14 +101,13 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-GOLD_HEX = "#FFDE58"
 _MARKUP_RE = re.compile(r"\*\*(.+?)\*\*|\+\+(.+?)\+\+")
 
 
-def _render_markup(text: str) -> str:
+def _render_markup(text: str, highlight_hex: str) -> str:
     """Render manual markup, escaping everything else:
-        **word**  -> bold white  (emphasis, same color as the rest of the body)
-        ++word++  -> bold gold   (the one highlighted name/fact, like the real newsletter)
+        **word**  -> bold, same color as the rest of the body
+        ++word++  -> bold, highlight color (the one name/fact that should pop)
     """
     out = []
     pos = 0
@@ -110,7 +116,7 @@ def _render_markup(text: str) -> str:
         if m.group(1) is not None:
             out.append(f"<b>{_escape(m.group(1))}</b>")
         else:
-            out.append(f'<b><font color="{GOLD_HEX}">{_escape(m.group(2))}</font></b>')
+            out.append(f'<b><font color="{highlight_hex}">{_escape(m.group(2))}</font></b>')
         pos = m.end()
     out.append(_escape(text[pos:]))
     return "".join(out)
@@ -128,15 +134,14 @@ def _lead_sentence(text: str) -> str:
     return text
 
 
-def format_article(text: str) -> str:
+def format_article(text: str, highlight_hex: str) -> str:
     """Render a story's note as an article.
 
-    If the note has manual ++gold highlight++ or **bold** markup, that's
+    If the note has manual ++highlight++ or **bold** markup, that's
     rendered as-is (this is how you match the real newsletter's look of
-    highlighting one specific name/fact in gold). Otherwise, the main point
-    (lead sentence) of each paragraph is auto-bolded in white as a
-    consistent fallback so nothing ever renders as a flat, unhighlighted
-    wall of text.
+    highlighting one specific name/fact). Otherwise, the main point (lead
+    sentence) of each paragraph is auto-bolded as a consistent fallback so
+    nothing ever renders as a flat, unhighlighted wall of text.
     """
     text = text.strip()
     if not text:
@@ -147,7 +152,7 @@ def format_article(text: str) -> str:
         if not para:
             continue
         if "**" in para or "++" in para:
-            paragraphs.append(_render_markup(para).replace("\n", "<br/>"))
+            paragraphs.append(_render_markup(para, highlight_hex).replace("\n", "<br/>"))
             continue
         lead = _lead_sentence(para)
         rest = para[len(lead):]
@@ -196,23 +201,29 @@ class StoryBlock(Flowable):
     MAX_PHOTOS = 9
     MIN_SCALE = 0.55
 
-    def __init__(self, heading, body, photo_paths):
+    def __init__(self, heading, body, photo_paths, style: dict):
         super().__init__()
         self.heading_text = heading.strip()
         self.body_text = body.strip()
         self.photo_paths = list(photo_paths)[: self.MAX_PHOTOS]
+        self.style = style
         self._geom = None
 
     def _build(self, avail_w, avail_h, scale):
-        content_w = avail_w - 2 * BLOCK_PAD
+        style = self.style
+        pad = BLOCK_PAD if style["block_shape"] != "bordered" else BLOCK_PAD + 6
+        content_w = avail_w - 2 * pad
+        if style["block_shape"] == "bordered":
+            content_w -= 8  # room for the left accent bar
 
         heading_style = ParagraphStyle(
-            "Heading", fontName="Helvetica-Bold", fontSize=13.5 * scale,
-            leading=16.5 * scale, textColor=GOLD, alignment=1,
+            "Heading", fontName=style["heading_font"], fontSize=style.get("heading_font_size", 13.5) * scale,
+            leading=style.get("heading_font_size", 13.5) * 1.2 * scale, textColor=style["heading_color"],
+            alignment=style.get("heading_align", 1),
         )
         body_style = ParagraphStyle(
-            "Body", fontName="Helvetica", fontSize=10.3 * scale,
-            leading=14.2 * scale, textColor=WHITE, alignment=0,
+            "Body", fontName=style["body_font"], fontSize=10.3 * scale,
+            leading=14.2 * scale, textColor=style["body_color"], alignment=0,
         )
 
         heading_flow = Paragraph(_escape(self.heading_text), heading_style) if self.heading_text else None
@@ -230,27 +241,28 @@ class StoryBlock(Flowable):
         if rows:
             photos_h += PHOTO_GAP * (len(rows) - 1)
 
-        body_markup = format_article(self.body_text)
+        body_markup = format_article(self.body_text, style["highlight_hex"])
         body_flow = Paragraph(body_markup, body_style) if body_markup else None
         body_h = body_flow.wrap(content_w, avail_h)[1] if body_flow else 0
 
         present = [p > 0 for p in (heading_h, photos_h, body_h)]
         gaps = max(0, sum(present) - 1)
         inner_gap = 10 * scale
-        total_h = 2 * BLOCK_PAD + heading_h + photos_h + body_h + gaps * inner_gap
+        rule_allowance = 10 if style["block_shape"] == "divided" else 0
+        total_h = 2 * pad + heading_h + photos_h + body_h + gaps * inner_gap + rule_allowance
 
         return dict(
-            height=total_h, content_w=content_w, inner_gap=inner_gap,
+            height=total_h, content_w=content_w, inner_gap=inner_gap, pad=pad,
             heading_flow=heading_flow, heading_h=heading_h,
             row_geom=row_geom, photos_h=photos_h,
-            body_flow=body_flow, body_h=body_h,
+            body_flow=body_flow, body_h=body_h, rule_allowance=rule_allowance,
         )
 
     def wrap(self, avail_w, avail_h):
         scale = 1.0
         g = self._build(avail_w, avail_h, scale)
 
-        if g["height"] > avail_h and not _is_fresh_page(avail_h):
+        if g["height"] > avail_h and not _is_fresh_page(avail_h, self.style):
             # Doesn't fit in whatever's left on a page that's already partly
             # full. Report the true (oversized) height, unshrunk — reportlab
             # reads that as "doesn't fit" and pushes the whole block onto a
@@ -286,19 +298,39 @@ class StoryBlock(Flowable):
     def draw(self):
         g = self._geom
         c = self.canv
+        style = self.style
         w, h = self._avail_w, g["height"]
+        pad = g["pad"]
+        shape = style["block_shape"]
 
-        c.setFillColorRGB(*GREEN)
-        c.roundRect(0, 0, w, h, BLOCK_RADIUS, stroke=0, fill=1)
+        x_offset = 0
+        if shape == "filled":
+            c.setFillColorRGB(*style["block_bg"])
+            c.roundRect(0, 0, w, h, style.get("block_radius", 0), stroke=0, fill=1)
+        elif shape == "bordered":
+            c.setFillColorRGB(*style["block_bg"])
+            c.setStrokeColorRGB(*style["ink"])
+            c.setLineWidth(0.6)
+            c.roundRect(0, 0, w, h, style.get("block_radius", 4), stroke=1, fill=1)
+            c.setFillColorRGB(*style["accent_rgb"])
+            c.rect(0, 0, 5, h, stroke=0, fill=1)
+            x_offset = 8
+        elif shape == "divided":
+            c.setStrokeColorRGB(*style["ink"])
+            c.setLineWidth(1.4)
+            c.line(0, h - 2, w, h - 2)
+            c.setLineWidth(0.5)
+            c.line(0, h - 5, w, h - 5)
 
-        y = h - BLOCK_PAD
+        y = h - pad - (g["rule_allowance"] if shape == "divided" else 0)
+        text_x = pad + x_offset
         if g["heading_h"]:
-            g["heading_flow"].drawOn(c, BLOCK_PAD, y - g["heading_h"])
+            g["heading_flow"].drawOn(c, text_x, y - g["heading_h"])
             y -= g["heading_h"] + g["inner_gap"]
 
         if g["row_geom"]:
             for row, cell_w, cell_h in g["row_geom"]:
-                x = BLOCK_PAD
+                x = text_x
                 for photo in row:
                     try:
                         cached = cropped_image_path(photo, cell_w, cell_h)
@@ -312,76 +344,143 @@ class StoryBlock(Flowable):
             y -= g["inner_gap"]
 
         if g["body_h"]:
-            g["body_flow"].drawOn(c, BLOCK_PAD, y - g["body_h"])
+            g["body_flow"].drawOn(c, text_x, y - g["body_h"])
 
 
 # --- page chrome ------------------------------------------------------
 
-def _fill_background(c):
-    c.setFillColorRGB(*CREAM)
+def _fill_background(c, style):
+    c.setFillColorRGB(*style["cream"])
     c.rect(0, 0, PAGE_W, PAGE_H, stroke=0, fill=1)
 
 
-def _draw_footer(c, doc):
-    c.setLineWidth(2)
-    c.setStrokeColorRGB(*BLACK)
+def _draw_footer(c, doc, style):
+    c.setLineWidth(1.4)
+    c.setStrokeColorRGB(*style["ink"])
     c.line(MARGIN_L, 48, PAGE_W - MARGIN_R, 48)
-    c.setFillColorRGB(*BLACK)
-    c.setFont("Helvetica-Bold", 10)
+    c.setFillColorRGB(*style["ink"])
+    c.setFont(style["body_font_bold"], 10)
     c.drawString(MARGIN_L, 32, doc.org_small)
 
 
-def on_cover_page(c, doc):
-    c.saveState()
-    _fill_background(c)
-    c.setFillColorRGB(*GREEN)
-    c.setFont("Helvetica-Bold", 16)
+def _draw_masthead_bold_banner(c, doc, style):
+    c.setFillColorRGB(*_hex_rgb(style["accent_hex"]))
+    c.setFont(style["heading_font"], 16)
     c.drawString(MARGIN_L, PAGE_H - 48, doc.org_small)
-    c.setFont("Helvetica-Bold", 46)
+    c.setFont(style["heading_font"], 46)
     c.drawString(MARGIN_L, PAGE_H - 100, doc.title_big)
-    c.setFillColorRGB(*BLACK)
-    c.setFont("Helvetica-Bold", 14)
+    c.setFillColorRGB(*style["ink"])
+    c.setFont(style["body_font_bold"], 14)
     c.drawCentredString(PAGE_W / 2, PAGE_H - 125, doc.date_range)
     c.setLineWidth(2)
-    c.setStrokeColorRGB(*BLACK)
-    c.line(MARGIN_L, PAGE_H - COVER_TOP + 5, PAGE_W - MARGIN_R, PAGE_H - COVER_TOP + 5)
-    _draw_footer(c, doc)
+    c.setStrokeColorRGB(*style["ink"])
+    c.line(MARGIN_L, PAGE_H - _cover_top(style) + 5, PAGE_W - MARGIN_R, PAGE_H - _cover_top(style) + 5)
+
+
+def _draw_masthead_nameplate(c, doc, style):
+    top = PAGE_H - 40
+    c.setStrokeColorRGB(*style["ink"])
+    c.setLineWidth(2.2)
+    c.line(MARGIN_L, top, PAGE_W - MARGIN_R, top)
+    c.setLineWidth(0.6)
+    c.line(MARGIN_L, top - 4, PAGE_W - MARGIN_R, top - 4)
+
+    c.setFillColorRGB(*style["ink"])
+    c.setFont(style["body_font_bold"], 11)
+    c.drawCentredString(PAGE_W / 2, top - 20, doc.org_small)
+
+    c.setFont(style["heading_font"], 40)
+    c.drawCentredString(PAGE_W / 2, top - 68, doc.title_big)
+
+    c.setFont(style["body_font"], 12)
+    c.drawCentredString(PAGE_W / 2, top - 88, doc.date_range)
+
+    bottom = top - 100
+    c.setLineWidth(0.6)
+    c.line(MARGIN_L, bottom, PAGE_W - MARGIN_R, bottom)
+    c.setLineWidth(2.2)
+    c.line(MARGIN_L, bottom - 4, PAGE_W - MARGIN_R, bottom - 4)
+
+
+def _draw_masthead_tab_underline(c, doc, style):
+    accent = _hex_rgb(style["accent_hex"])
+    c.setFillColorRGB(*accent)
+    c.rect(MARGIN_L, PAGE_H - 36, 64, 16, stroke=0, fill=1)
+    c.setFillColorRGB(1, 1, 1)
+    c.setFont(style["body_font_bold"], 9)
+    c.drawCentredString(MARGIN_L + 32, PAGE_H - 32, doc.org_small)
+
+    c.setFillColorRGB(*style["ink"])
+    c.setFont(style["heading_font"], 38)
+    c.drawString(MARGIN_L, PAGE_H - 78, doc.title_big)
+
+    c.setFillColorRGB(*accent)
+    c.rect(MARGIN_L, PAGE_H - 92, 140, 4, stroke=0, fill=1)
+
+    c.setFillColorRGB(*style["ink"])
+    c.setFont(style["body_font"], 12)
+    c.drawString(MARGIN_L, PAGE_H - 112, doc.date_range)
+
+
+_MASTHEAD_DRAWERS = {
+    "bold-banner": _draw_masthead_bold_banner,
+    "nameplate": _draw_masthead_nameplate,
+    "tab-underline": _draw_masthead_tab_underline,
+}
+
+
+def _hex_rgb(hex_color: str):
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def on_cover_page(c, doc):
+    style = doc.style
+    c.saveState()
+    _fill_background(c, style)
+    _MASTHEAD_DRAWERS.get(style["masthead_style"], _draw_masthead_bold_banner)(c, doc, style)
+    _draw_footer(c, doc, style)
     c.restoreState()
 
 
 def on_inner_page(c, doc):
+    style = doc.style
     c.saveState()
-    _fill_background(c)
-    c.setFillColorRGB(*BLACK)
-    c.setFont("Helvetica-Bold", 13)
+    _fill_background(c, style)
+    c.setFillColorRGB(*style["ink"])
+    c.setFont(style["body_font_bold"], 13)
     c.drawString(MARGIN_L, PAGE_H - 40, doc.date_range)
     c.drawRightString(PAGE_W - MARGIN_R, PAGE_H - 40, doc.title_big)
     c.setLineWidth(2)
     c.line(MARGIN_L, PAGE_H - INNER_TOP + 8, PAGE_W - MARGIN_R, PAGE_H - INNER_TOP + 8)
-    _draw_footer(c, doc)
+    _draw_footer(c, doc, style)
     c.restoreState()
 
 
-class NumberedCanvas(rl_canvas.Canvas):
-    """Buffers pages so the footer can print 'Page X of N' (N needs the final count)."""
+def make_numbered_canvas(style: dict):
+    """A Canvas subclass bound to this render's style, so the buffered
+    'Page X of N' footer can be drawn in the right ink color/font."""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._saved = []
+    class _NumberedCanvas(rl_canvas.Canvas):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._saved = []
 
-    def showPage(self):
-        self._saved.append(dict(self.__dict__))
-        self._startPage()
+        def showPage(self):
+            self._saved.append(dict(self.__dict__))
+            self._startPage()
 
-    def save(self):
-        total = len(self._saved)
-        for state in self._saved:
-            self.__dict__.update(state)
-            self.setFillColorRGB(*BLACK)
-            self.setFont("Helvetica-Bold", 10)
-            self.drawRightString(PAGE_W - MARGIN_R, 32, f"Page {self._pageNumber} of {total}")
-            super().showPage()
-        super().save()
+        def save(self):
+            total = len(self._saved)
+            for state in self._saved:
+                self.__dict__.update(state)
+                self.setFillColorRGB(*style["ink"])
+                self.setFont(style["body_font_bold"], 10)
+                self.drawRightString(PAGE_W - MARGIN_R, 32, f"Page {self._pageNumber} of {total}")
+                rl_canvas.Canvas.showPage(self)
+            rl_canvas.Canvas.save(self)
+
+    return _NumberedCanvas
 
 
 # --- loading + building --------------------------------------------------
@@ -422,25 +521,29 @@ def render_pdf(config: dict, stories: list, output_path: Path) -> Path:
         for heading in bare:
             print(f"  - {heading}")
 
+    style = get_style(config.get("style", DEFAULT_STYLE_ID))
+    cover_top = _cover_top(style)
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     doc = BaseDocTemplate(
         str(output_path), pagesize=A4,
         leftMargin=MARGIN_L, rightMargin=MARGIN_R,
-        topMargin=COVER_TOP, bottomMargin=MARGIN_BOTTOM,
+        topMargin=cover_top, bottomMargin=MARGIN_BOTTOM,
     )
     doc.org_small = config.get("org_small", "")
     doc.title_big = config.get("title_big", "NEWSLETTER")
     doc.date_range = config.get("date_range", "")
+    doc.style = style
 
     # Frame defaults to 6pt padding on every side, which would silently
-    # shrink the usable area below COVER_FRAME_H/INNER_FRAME_H and break the
-    # _is_fresh_page() comparison in StoryBlock.wrap() — zero it out so the
-    # frame's real usable area matches those constants exactly.
+    # shrink the usable area below the frame-height constants and break
+    # the _is_fresh_page() comparison in StoryBlock.wrap() — zero it out
+    # so the frame's real usable area matches those constants exactly.
     frame_kwargs = dict(leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
     cover_frame = Frame(MARGIN_L, MARGIN_BOTTOM, PAGE_W - MARGIN_L - MARGIN_R,
-                         PAGE_H - COVER_TOP - MARGIN_BOTTOM, id="cover", **frame_kwargs)
+                         PAGE_H - cover_top - MARGIN_BOTTOM, id="cover", **frame_kwargs)
     inner_frame = Frame(MARGIN_L, MARGIN_BOTTOM, PAGE_W - MARGIN_L - MARGIN_R,
                          PAGE_H - INNER_TOP - MARGIN_BOTTOM, id="inner", **frame_kwargs)
 
@@ -451,11 +554,11 @@ def render_pdf(config: dict, stories: list, output_path: Path) -> Path:
 
     flow = [NextPageTemplate("Inner")]
     for i, (heading, note, photos) in enumerate(stories):
-        flow.append(StoryBlock(heading, note, photos))
+        flow.append(StoryBlock(heading, note, photos, style))
         if i != len(stories) - 1:
             flow.append(Spacer(1, BLOCK_GAP))
 
-    doc.build(flow, canvasmaker=NumberedCanvas)
+    doc.build(flow, canvasmaker=make_numbered_canvas(style))
     return output_path
 
 

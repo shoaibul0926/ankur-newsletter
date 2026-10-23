@@ -102,6 +102,19 @@
   .hint code {
     background: var(--cream-deep); padding: 1px 5px; border-radius: 5px; font-size: 11.5px;
   }
+  .style-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .style-card {
+    position: relative; display: flex; flex-direction: column; gap: 4px;
+    border: 1.5px solid #e1ddc9; border-radius: 12px; padding: 12px; cursor: pointer;
+    transition: border-color .15s, box-shadow .15s; background: #fffef9;
+  }
+  .style-card:hover { border-color: #c9c3a4; }
+  .style-card.checked { border-color: var(--green); box-shadow: 0 0 0 3px rgba(46,100,23,.12); }
+  .style-card input { position: absolute; opacity: 0; }
+  .style-swatch { width: 22px; height: 22px; border-radius: 7px; display: block; }
+  .style-name { font-size: 13px; font-weight: 700; color: var(--ink); }
+  .style-desc { font-size: 11px; color: var(--muted); line-height: 1.4; }
+
   .row { display: flex; gap: 12px; }
   .row > div { flex: 1; }
 
@@ -280,6 +293,19 @@
       </div>
       <label>Date range</label>
       <input type="text" name="date_range" value="{{ config.date_range }}" placeholder="JANUARY - MARCH 2026">
+
+      <label>Style</label>
+      <div class="style-grid">
+        {% for sid, s in available_styles.items() %}
+        <label class="style-card {{ 'checked' if config.style == sid }}">
+          <input type="radio" name="style" value="{{ sid }}" {{ "checked" if config.style == sid }}>
+          <span class="style-swatch" style="background:{{ s.accent_hex }}"></span>
+          <span class="style-name">{{ s.name }}</span>
+          <span class="style-desc">{{ s.description }}</span>
+        </label>
+        {% endfor %}
+      </div>
+
       <button type="submit" class="btn-secondary">Save masthead</button>
     </form>
   </section>
@@ -379,6 +405,14 @@ function wireDropzone(zoneId, inputId, labelId) {
 }
 wireDropzone('deckZone', 'deckInput', 'deckFileName');
 wireDropzone('photoZone', 'photoInput', 'photoFileName');
+
+// -- live highlight for the selected style card --
+document.querySelectorAll('.style-card input').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.querySelectorAll('.style-card').forEach(c => c.classList.remove('checked'));
+    radio.closest('.style-card').classList.add('checked');
+  });
+});
 
 // -- live thumbnail previews for the manual photo upload --
 const photoInput = document.getElementById('photoInput');
