@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ankur Newsletter Builder</title>
+<style>
+  :root {
+    --cream: #f5f3e8; --green: #2e5c33; --gold: #d4a820; --black: #222;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, Segoe UI, Arial, sans-serif;
+    background: var(--cream); color: var(--black);
+    margin: 0; padding: 24px 16px 80px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { color: var(--green); font-size: 28px; margin-bottom: 4px; }
+  .sub { color: #555; margin-top: 0; margin-bottom: 24px; }
+  section {
+    background: #fff; border-radius: 10px; padding: 18px 20px;
+    margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  section h2 { margin-top: 0; font-size: 16px; color: var(--green); }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
+  input[type=text], textarea, input[type=file] {
+    width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px;
+    font-family: inherit; font-size: 14px;
+  }
+  textarea { min-height: 90px; resize: vertical; }
+  .hint { font-size: 12px; color: #777; margin-top: 4px; }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  button, .btn {
+    display: inline-block; margin-top: 14px; padding: 9px 18px; border: 0;
+    border-radius: 6px; background: var(--green); color: #fff; font-weight: 600;
+    font-size: 14px; cursor: pointer; text-decoration: none;
+  }
+  button.secondary { background: #888; }
+  button.danger { background: #a33; padding: 5px 10px; font-size: 12px; margin-top: 0; }
+  .generate {
+    background: var(--gold); color: #3a2c00; font-size: 16px; padding: 12px 22px;
+  }
+  .story-card {
+    border: 1px solid #e3e0d0; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px;
+  }
+  .story-card h3 { margin: 0 0 4px; color: var(--green); font-size: 15px; }
+  .story-card .note { font-size: 13px; color: #333; white-space: pre-wrap; margin: 6px 0; }
+  .thumbs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .thumbs img { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .empty { color: #777; font-size: 14px; }
+  form.inline { display: inline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Ankur Newsletter Builder</h1>
+  <p class="sub">Add stories by hand, or upload a deck to pull several out at once — then generate the PDF.</p>
+
+  <section>
+    <h2>Masthead</h2>
+    <form method="post" action="{{ url_for('update_config') }}">
+      <div class="row">
+        <div>
+          <label>Org (small, top-left)</label>
+          <input type="text" name="org_small" value="{{ config.org_small }}">
+        </div>
+        <div>
+          <label>Title (big)</label>
+          <input type="text" name="title_big" value="{{ config.title_big }}">
+        </div>
+      </div>
+      <label>Date range</label>
+      <input type="text" name="date_range" value="{{ config.date_range }}" placeholder="JANUARY - MARCH 2026">
+      <button type="submit" class="secondary">Save masthead</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Upload a deck (.pptx, .pdf, or .docx)</h2>
+    <form method="post" action="{{ url_for('upload_deck') }}" enctype="multipart/form-data">
+      <input type="file" name="deck" accept=".pptx,.pdf,.docx" required>
+      <p class="hint">Pulls one story per slide/page/heading. Review and trim the notes afterwards — this only extracts, it doesn't shorten anything for you.</p>
+      <button type="submit">Extract stories</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Add a story by hand</h2>
+    <form method="post" action="{{ url_for('add_story') }}" enctype="multipart/form-data">
+      <label>Heading</label>
+      <input type="text" name="heading" placeholder="e.g. Self-Defence and Discipline">
+      <label>Note</label>
+      <textarea name="note" placeholder="Certificates were awarded to students who advanced in the Karate belt examination..."></textarea>
+      <p class="hint">Blank line = new paragraph. Mark at most one key name/fact with <code>++like this++</code> for a gold highlight, or <code>**like this**</code> for plain bold. Leave it unmarked and the lead sentence is bolded automatically.</p>
+      <label>Photos</label>
+      <input type="file" name="photos" accept=".jpg,.jpeg,.png,.webp" multiple>
+      <button type="submit">Add story</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Queued stories ({{ stories|length }})</h2>
+    {% if not stories %}
+      <p class="empty">Nothing yet — add a story above or upload a deck.</p>
+    {% endif %}
+    {% for s in stories %}
+      <div class="story-card">
+        <div class="card-top">
+          <h3>{{ s.heading or "(no heading)" }}</h3>
+          <form class="inline" method="post" action="{{ url_for('delete_story', name=s.name) }}"
+                onsubmit="return confirm('Remove this story?');">
+            <button type="submit" class="danger">Remove</button>
+          </form>
+        </div>
+        {% if s.note %}<div class="note">{{ s.note }}</div>{% endif %}
+        {% if s.photo_urls %}
+        <div class="thumbs">
+          {% for url in s.photo_urls %}<img src="{{ url }}">{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </section>
+
+  <a class="btn generate" href="{{ url_for('generate') }}" target="_blank">Generate Newsletter PDF</a>
+</div>
+</body>
+</html>
