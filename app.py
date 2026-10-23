@@ -4,8 +4,13 @@ Ankur newsletter — Phase 3: local web UI.
 Ties Phase 1 (generate.py) and Phase 2 (extract.py) together behind one
 page: add a story by hand (heading + note + photos), or upload a deck
 (.pptx/.pdf/.docx) to auto-extract several stories at once, review what's
-queued, then generate the PDF. The stories/ folder on disk is the one
-source of truth — this UI just reads and writes it, same as the CLI tools.
+queued, then generate the PDF.
+
+Storage: locally (python app.py), the stories/ folder on disk is the one
+source of truth, same as the CLI tools. On Vercel, the filesystem is
+read-only outside /tmp, so github_storage.py is used instead -- every
+read/write goes straight to the GitHub repo via its API, so changes show
+up on the next page load with no redeploy needed. See github_storage.py.
 
 Run:
     python app.py
@@ -13,16 +18,20 @@ Run:
 Then open http://127.0.0.1:5000
 """
 
+import io
 import json
+import mimetypes
 import re
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 
 from flask import Flask, abort, flash, redirect, render_template, request, send_file, url_for
 
+import github_storage as gh
 from extract import extract_deck, write_stories
-from generate import BASE_DIR, find_bare_photo_stories, load_stories, render_pdf
+from generate import BASE_DIR, load_stories, render_pdf
 from styles import DEFAULT_STYLE_ID, STYLES
 
 app = Flask(__name__)
@@ -30,15 +39,20 @@ app.secret_key = "ankur-newsletter-builder-local-only"  # flash messages only; n
 
 STORIES_DIR = BASE_DIR / "stories"
 OUTPUT_DIR = BASE_DIR / "output"
-UPLOAD_TMP = BASE_DIR / "web_uploads" / "tmp"
 CONFIG_PATH = BASE_DIR / "issue.json"
 
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 DECK_EXTS = {".pptx", ".pdf", ".docx"}
 
 
+def using_github() -> bool:
+    return gh.is_enabled()
+
+
 def load_config() -> dict:
-    if CONFIG_PATH.exists():
+    if using_github():
+        config = gh.load_config()
+    elif CONFIG_PATH.exists():
         config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     else:
         config = {"org_small": "ANKUR", "title_big": "NEWSLETTER", "date_range": "", "output_file": "output/newsletter.pdf"}
@@ -47,10 +61,25 @@ def load_config() -> dict:
 
 
 def save_config(config: dict) -> None:
-    CONFIG_PATH.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    if using_github():
+        gh.save_config(config)
+    else:
+        CONFIG_PATH.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
 
 def list_story_cards():
+    """[{name, heading, note, photo_urls}, ...] -- the shape index.html renders."""
+    if using_github():
+        cards = []
+        for s in gh.list_stories():
+            cards.append({
+                "name": s["name"],
+                "heading": s["heading"],
+                "note": s["note"],
+                "photo_urls": [url_for("photo_gh", sha=sha, filename=fn) for fn, sha in s["photos"]],
+            })
+        return cards
+
     cards = []
     if not STORIES_DIR.exists():
         return cards
@@ -68,11 +97,32 @@ def list_story_cards():
     return cards
 
 
+def current_stories_for_generate(tmp_dir: Path):
+    """list of (heading, note, photo_paths) for render_pdf(). On GitHub
+    storage, downloads each story's photos into tmp_dir first since the
+    PDF renderer needs real files on disk."""
+    if not using_github():
+        return load_stories(STORIES_DIR)
+
+    stories = []
+    for s in gh.list_stories():
+        photo_paths = []
+        if s["photos"]:
+            story_dir = tmp_dir / s["name"]
+            story_dir.mkdir(parents=True, exist_ok=True)
+            for filename, sha in s["photos"]:
+                dest = story_dir / filename
+                dest.write_bytes(gh.get_blob(sha))
+                photo_paths.append(dest)
+        if s["heading"] or s["note"] or photo_paths:
+            stories.append((s["heading"], s["note"], photo_paths))
+    return stories
+
+
 @app.route("/")
 def index():
-    stories = load_stories(STORIES_DIR)
-    bare_photo_headings = find_bare_photo_stories(stories)
     cards = list_story_cards()
+    bare_photo_headings = [c["heading"] or "(no heading)" for c in cards if c["photo_urls"] and not c["note"]]
     total_photos = sum(len(c["photo_urls"]) for c in cards)
     return render_template("index.html", config=load_config(), stories=cards,
                             bare_photo_headings=bare_photo_headings, total_photos=total_photos,
@@ -85,6 +135,18 @@ def photo(relpath):
     if not full.is_relative_to(STORIES_DIR.resolve()) or not full.exists():
         abort(404)
     return send_file(full)
+
+
+@app.route("/photo-gh/<sha>/<path:filename>")
+def photo_gh(sha, filename):
+    """Serves a story photo straight from its GitHub blob SHA -- used
+    instead of /photo/... when running on github_storage."""
+    try:
+        data = gh.get_blob(sha)
+    except Exception:
+        abort(404)
+    mimetype = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return send_file(io.BytesIO(data), mimetype=mimetype)
 
 
 @app.route("/config", methods=["POST"])
@@ -105,21 +167,28 @@ def add_story():
     heading = request.form.get("heading", "").strip()
     note = request.form.get("note", "").strip()
 
-    session_dir = UPLOAD_TMP / uuid.uuid4().hex[:10]
-    images = []
+    uploads = []  # (filename, bytes) for GitHub, or (filename, Path) for local
+    session_dir = None
     for i, f in enumerate(request.files.getlist("photos")):
         if f and f.filename:
             ext = Path(f.filename).suffix.lower()
             if ext not in PHOTO_EXTS:
                 continue
-            session_dir.mkdir(parents=True, exist_ok=True)
-            dest = session_dir / f"photo_{i}{ext}"
-            f.save(dest)
-            images.append(dest)
+            if using_github():
+                uploads.append((f"img_{i}{ext}", f.read()))
+            else:
+                session_dir = session_dir or Path(tempfile.mkdtemp())
+                dest = session_dir / f"photo_{i}{ext}"
+                f.save(dest)
+                uploads.append(dest)
 
-    if heading or note or images:
-        write_stories([{"heading": heading, "note": note, "images": images}], STORIES_DIR, "story")
-        if images and not note:
+    has_content = heading or note or uploads
+    if has_content:
+        if using_github():
+            gh.add_stories([{"heading": heading, "note": note, "images": uploads}])
+        else:
+            write_stories([{"heading": heading, "note": note, "images": uploads}], STORIES_DIR, "story")
+        if uploads and not note:
             flash(f"Added “{heading or '(no heading)'}” — but it has photos and no "
                   f"article yet. Write a caption for it before generating.", "error")
         else:
@@ -127,7 +196,7 @@ def add_story():
     else:
         flash("Nothing to add — fill in a heading, note, or photo first.", "error")
 
-    if session_dir.exists():
+    if session_dir and session_dir.exists():
         shutil.rmtree(session_dir, ignore_errors=True)
 
     return redirect(url_for("index"))
@@ -144,8 +213,7 @@ def upload_deck():
         flash("Please upload a .pptx, .pdf, or .docx file.", "error")
         return redirect(url_for("index"))
 
-    session_dir = UPLOAD_TMP / uuid.uuid4().hex[:10]
-    session_dir.mkdir(parents=True, exist_ok=True)
+    session_dir = Path(tempfile.mkdtemp())
     src_path = session_dir / f"source{ext}"
     f.save(src_path)
 
@@ -157,7 +225,12 @@ def upload_deck():
         return redirect(url_for("index"))
 
     if slides:
-        write_stories(slides, STORIES_DIR, Path(f.filename).stem)
+        if using_github():
+            gh_slides = [{"heading": s["heading"], "note": s["note"],
+                          "images": [(p.name, p.read_bytes()) for p in s["images"]]} for s in slides]
+            gh.add_stories(gh_slides, Path(f.filename).stem)
+        else:
+            write_stories(slides, STORIES_DIR, Path(f.filename).stem)
         no_article = [s["heading"] or "(no heading)" for s in slides if s["images"] and not s["note"]]
         if no_article:
             flash(f"Extracted {len(slides)} stor{'y' if len(slides) == 1 else 'ies'} from {f.filename} — "
@@ -178,28 +251,37 @@ def upload_deck():
 def delete_story(name):
     if not re.match(r"^[\w\-]+$", name):
         abort(400)
-    folder = (STORIES_DIR / name).resolve()
-    if folder.is_relative_to(STORIES_DIR.resolve()) and folder.is_dir():
-        shutil.rmtree(folder)
+    if using_github():
+        gh.delete_story(name)
         flash("Story removed.", "success")
+    else:
+        folder = (STORIES_DIR / name).resolve()
+        if folder.is_relative_to(STORIES_DIR.resolve()) and folder.is_dir():
+            shutil.rmtree(folder)
+            flash("Story removed.", "success")
     return redirect(url_for("index"))
 
 
 @app.route("/generate")
 def generate():
-    stories = load_stories(STORIES_DIR)
-    if not stories:
-        abort(400, "No stories yet — add one by hand or upload a deck first.")
-    output_path = OUTPUT_DIR / "newsletter.pdf"
-    render_pdf(load_config(), stories, output_path)
-    response = send_file(output_path, mimetype="application/pdf", as_attachment=False,
-                          download_name="newsletter.pdf")
-    # This same URL serves a freshly-regenerated file every time (e.g. after
-    # switching styles) — without this, browsers/PDF viewers can silently
-    # keep showing a cached response from an earlier style.
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    return response
+    tmp_dir = Path(tempfile.mkdtemp())
+    try:
+        stories = current_stories_for_generate(tmp_dir)
+        if not stories:
+            abort(400, "No stories yet — add one by hand or upload a deck first.")
+        output_path = (Path(tempfile.gettempdir()) / f"newsletter_{uuid.uuid4().hex[:8]}.pdf"
+                        if using_github() else OUTPUT_DIR / "newsletter.pdf")
+        render_pdf(load_config(), stories, output_path)
+        response = send_file(output_path, mimetype="application/pdf", as_attachment=False,
+                              download_name="newsletter.pdf")
+        # This same URL serves a freshly-regenerated file every time (e.g. after
+        # switching styles) — without this, browsers/PDF viewers can silently
+        # keep showing a cached response from an earlier style.
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        return response
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

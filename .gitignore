@@ -7,3 +7,5 @@ app_log.txt
 *.docx
 output/*.pdf
 .env
+
+.vercel
