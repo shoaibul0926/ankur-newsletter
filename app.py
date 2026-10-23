@@ -66,8 +66,10 @@ def list_story_cards():
 def index():
     stories = load_stories(STORIES_DIR)
     bare_photo_headings = find_bare_photo_stories(stories)
-    return render_template("index.html", config=load_config(), stories=list_story_cards(),
-                            bare_photo_headings=bare_photo_headings)
+    cards = list_story_cards()
+    total_photos = sum(len(c["photo_urls"]) for c in cards)
+    return render_template("index.html", config=load_config(), stories=cards,
+                            bare_photo_headings=bare_photo_headings, total_photos=total_photos)
 
 
 @app.route("/photo/<path:relpath>")
