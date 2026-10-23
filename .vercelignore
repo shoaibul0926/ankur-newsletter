@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.image_cache/
+web_uploads/
+app_log.txt
+*.pptx
+*.docx
+output/
+.env
+.git/
