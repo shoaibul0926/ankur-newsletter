@@ -44,19 +44,35 @@ def _register(name: str, filename: str) -> str:
     return _registered[name]
 
 
-# Serif family for the broadsheet style
-GEORGIA = _register("Georgia", "georgia.ttf")
-GEORGIA_BOLD = _register("Georgia-Bold", "georgiab.ttf")
-TIMES = _register("TimesNewRoman", "times.ttf")
-TIMES_BOLD = _register("TimesNewRoman-Bold", "timesbd.ttf")
-TIMES_ITALIC = _register("TimesNewRoman-Italic", "timesi.ttf")
-# Rounded sans for the magazine/pastel styles
-TREBUCHET = _register("Trebuchet", "trebuc.ttf")
-TREBUCHET_BOLD = _register("Trebuchet-Bold", "trebucbd.ttf")
-# Clean modern sans for the minimalist style
-CALIBRI = _register("Calibri", "calibri.ttf")
-CALIBRI_BOLD = _register("Calibri-Bold", "calibrib.ttf")
-CALIBRI_LIGHT = _register("Calibri-Light", "calibril.ttf")
+def _register_family(family: str, regular: str, bold: str, italic: str | None = None) -> tuple:
+    """Register normal+bold(+italic) weights of a font AND tell reportlab
+    they're one family (registerFontFamily). Without this, a Paragraph's
+    <b>...</b> tag silently renders in the *regular* weight for any custom
+    TTF font -- it only auto-resolves bold for reportlab's built-in fonts
+    (Helvetica, Times-Roman, ...). Returns (regular_name, bold_name).
+    """
+    reg = _register(f"{family}", regular)
+    bld = _register(f"{family}-Bold", bold)
+    ital = _register(f"{family}-Italic", italic) if italic else reg
+    pdfmetrics.registerFontFamily(family, normal=reg, bold=bld, italic=ital, boldItalic=bld)
+    return reg, bld
+
+
+# Classic serif newspaper type (broadsheet style)
+TIMES, TIMES_BOLD = _register_family("TimesNewRoman", "times.ttf", "timesbd.ttf", "timesi.ttf")
+# Elegant serif for formal/official type (formal-bulletin style)
+GEORGIA, GEORGIA_BOLD = _register_family("Georgia", "georgia.ttf", "georgiab.ttf", "georgiai.ttf")
+# Geometric heavy sans for modern magazine headlines (bold-magazine style)
+GOTHIC, GOTHIC_BOLD = _register_family("CenturyGothic", "GOTHIC.TTF", "GOTHICB.TTF", "GOTHICI.TTF")
+# Warm humanist sans for a friendly, welcoming feel (pastel-community style)
+CANDARA, CANDARA_BOLD = _register_family("Candara", "Candara.ttf", "Candarab.ttf", "Candarai.ttf")
+# Clean neutral sans for a quiet, minimal feel (minimalist style)
+SEGOE, SEGOE_BOLD = _register_family("SegoeUI", "segoeui.ttf", "segoeuib.ttf", "segoeuii.ttf")
+# Condensed bold for tight sports-page headlines (sports-two-tone style)
+ARIALN, ARIALN_BOLD = _register_family("ArialNarrow", "ARIALN.TTF", "ARIALNB.TTF", "ARIALNI.TTF")
+# Heavy display face for loud tabloid headlines only -- never body text,
+# it's too condensed/dense to read in long runs (tabloid-pop style)
+IMPACT = _register("Impact", "impact.ttf")
 
 
 STYLES = {
@@ -112,10 +128,10 @@ STYLES = {
         "body_color": (0.2, 0.18, 0.15),
         "highlight_hex": "#C7400F",
         "accent_hex": "#C7400F",
-        "heading_font": TREBUCHET_BOLD,
+        "heading_font": GOTHIC_BOLD,
         "heading_font_size": 15,
-        "body_font": TREBUCHET,
-        "body_font_bold": TREBUCHET_BOLD,
+        "body_font": GOTHIC,
+        "body_font_bold": GOTHIC_BOLD,
         "masthead_style": "tab-underline",
     },
 
@@ -131,8 +147,8 @@ STYLES = {
         "body_color": (1, 1, 1),
         "highlight_hex": "#FFE066",
         "accent_hex": "#E84A27",
-        "heading_font": "Helvetica-Bold",
-        "heading_font_size": 17,
+        "heading_font": IMPACT,
+        "heading_font_size": 20,
         "body_font": "Helvetica",
         "body_font_bold": "Helvetica-Bold",
         "masthead_style": "tab-underline",
@@ -149,11 +165,11 @@ STYLES = {
         "body_color": (0.33, 0.32, 0.29),
         "highlight_hex": "#8C7A5C",
         "accent_hex": "#8C7A5C",
-        "heading_font": CALIBRI_BOLD,
+        "heading_font": SEGOE_BOLD,
         "heading_font_size": 13,
         "heading_align": 0,
-        "body_font": CALIBRI,
-        "body_font_bold": CALIBRI_BOLD,
+        "body_font": SEGOE,
+        "body_font_bold": SEGOE_BOLD,
         "masthead_style": "minimal-rule",
     },
 
@@ -191,10 +207,10 @@ STYLES = {
         "body_color": (0.3, 0.25, 0.22),
         "highlight_hex": "#D16A3F",
         "accent_hex": "#ED9E7D",
-        "heading_font": TREBUCHET_BOLD,
+        "heading_font": CANDARA_BOLD,
         "heading_font_size": 14,
-        "body_font": TREBUCHET,
-        "body_font_bold": TREBUCHET_BOLD,
+        "body_font": CANDARA,
+        "body_font_bold": CANDARA_BOLD,
         "masthead_style": "tab-underline",
     },
 
@@ -210,8 +226,9 @@ STYLES = {
         "body_color": (0.88, 0.9, 0.93),
         "highlight_hex": "#E8384F",
         "accent_hex": "#13203F",
-        "heading_font": "Helvetica-Bold",
-        "heading_font_size": 14,
+        "heading_font": ARIALN_BOLD,
+        "heading_font_size": 16,
+        "heading_align": 0,
         "body_font": "Helvetica",
         "body_font_bold": "Helvetica-Bold",
         "masthead_style": "bold-banner",
