@@ -422,10 +422,46 @@ def _draw_masthead_tab_underline(c, doc, style):
     c.drawString(MARGIN_L, PAGE_H - 112, doc.date_range)
 
 
+def _draw_masthead_minimal_rule(c, doc, style):
+    c.setStrokeColorRGB(*style["ink"])
+    c.setLineWidth(0.6)
+    c.line(MARGIN_L, PAGE_H - 55, PAGE_W - MARGIN_R, PAGE_H - 55)
+
+    c.setFillColorRGB(*style["ink"])
+    c.setFont(style["body_font"], 10)
+    c.drawString(MARGIN_L, PAGE_H - 70, doc.org_small)
+    c.drawRightString(PAGE_W - MARGIN_R, PAGE_H - 70, doc.date_range)
+
+    c.setFont(style["heading_font"], 28)
+    c.drawString(MARGIN_L, PAGE_H - 103, doc.title_big)
+
+
+def _draw_masthead_boxed_formal(c, doc, style):
+    box_top = PAGE_H - 30
+    box_bottom = PAGE_H - _cover_top(style) + 18
+
+    c.setStrokeColorRGB(*style["ink"])
+    c.setLineWidth(1.2)
+    c.rect(MARGIN_L, box_bottom, PAGE_W - MARGIN_L - MARGIN_R, box_top - box_bottom, stroke=1, fill=0)
+    c.setLineWidth(0.4)
+    c.rect(MARGIN_L + 4, box_bottom + 4, PAGE_W - MARGIN_L - MARGIN_R - 8, box_top - box_bottom - 8,
+           stroke=1, fill=0)
+
+    c.setFillColorRGB(*style["ink"])
+    c.setFont(style["body_font_bold"], 10)
+    c.drawCentredString(PAGE_W / 2, box_top - 24, doc.org_small)
+    c.setFont(style["heading_font"], 30)
+    c.drawCentredString(PAGE_W / 2, box_top - 58, doc.title_big)
+    c.setFont(style["body_font"], 11)
+    c.drawCentredString(PAGE_W / 2, box_top - 78, doc.date_range)
+
+
 _MASTHEAD_DRAWERS = {
     "bold-banner": _draw_masthead_bold_banner,
     "nameplate": _draw_masthead_nameplate,
     "tab-underline": _draw_masthead_tab_underline,
+    "minimal-rule": _draw_masthead_minimal_rule,
+    "boxed-formal": _draw_masthead_boxed_formal,
 }
 
 

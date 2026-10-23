@@ -8,13 +8,15 @@ adding one entry here — generate.py's rendering code branches on
 style["block_shape"], not on the style id, so new styles reuse the same
 three drawing paths instead of each needing bespoke layout code.
 
-Roadmap: this ships 3 styles now (ankur-classic + two genuinely different
-newspaper/magazine looks) out of a planned ~20, built a few at a time.
-Easy next additions once more are wanted: a tabloid/collage style, a
-formal black-tie bulletin, a pastel community-newsletter style, a
-two-tone sports-page style, a minimalist Scandinavian style, etc. — each
-is just a new dict below plus, if it needs a new block_shape, one more
-branch in StoryBlock.draw().
+Roadmap: 8 of a planned ~20 styles are built so far, a batch at a time:
+ankur-classic, broadsheet-editorial, bold-magazine, tabloid-pop,
+minimalist, formal-bulletin, pastel-community, sports-two-tone. Ideas
+for the next batch: a photo-led collage style (needs a new block_shape
+with a full-bleed hero image), a letterpress/kraft-paper look, a
+two-column dense-text style, a holiday/festive style, a black-and-gold
+gala style, a kids'-drawing-inspired playful style. Each is just a new
+dict below plus, if it needs a new block_shape or masthead_style, one
+more branch in StoryBlock.draw() / _MASTHEAD_DRAWERS.
 """
 
 from pathlib import Path
@@ -48,9 +50,13 @@ GEORGIA_BOLD = _register("Georgia-Bold", "georgiab.ttf")
 TIMES = _register("TimesNewRoman", "times.ttf")
 TIMES_BOLD = _register("TimesNewRoman-Bold", "timesbd.ttf")
 TIMES_ITALIC = _register("TimesNewRoman-Italic", "timesi.ttf")
-# Rounded sans for the magazine style
+# Rounded sans for the magazine/pastel styles
 TREBUCHET = _register("Trebuchet", "trebuc.ttf")
 TREBUCHET_BOLD = _register("Trebuchet-Bold", "trebucbd.ttf")
+# Clean modern sans for the minimalist style
+CALIBRI = _register("Calibri", "calibri.ttf")
+CALIBRI_BOLD = _register("Calibri-Bold", "calibrib.ttf")
+CALIBRI_LIGHT = _register("Calibri-Light", "calibril.ttf")
 
 
 STYLES = {
@@ -109,6 +115,104 @@ STYLES = {
         "body_font": TREBUCHET,
         "body_font_bold": TREBUCHET_BOLD,
         "masthead_style": "tab-underline",
+    },
+
+    "tabloid-pop": {
+        "name": "Tabloid Pop",
+        "description": "Punchy and loud: bold coral blocks, big condensed headlines, high energy.",
+        "cream": (255 / 255, 251 / 255, 244 / 255),
+        "ink": (0.08, 0.06, 0.05),
+        "block_shape": "filled",
+        "block_bg": (232 / 255, 74 / 255, 39 / 255),
+        "block_radius": 0,
+        "heading_color": (1, 1, 1),
+        "body_color": (1, 1, 1),
+        "highlight_hex": "#FFE066",
+        "accent_hex": "#E84A27",
+        "heading_font": "Helvetica-Bold",
+        "heading_font_size": 17,
+        "body_font": "Helvetica",
+        "body_font_bold": "Helvetica-Bold",
+        "masthead_style": "tab-underline",
+    },
+
+    "minimalist": {
+        "name": "Minimalist",
+        "description": "Quiet and airy: a single thin rule, muted stone ink, lots of whitespace.",
+        "cream": (252 / 255, 251 / 255, 249 / 255),
+        "ink": (0.3, 0.29, 0.26),
+        "block_shape": "divided",
+        "block_radius": 0,
+        "heading_color": (0.2, 0.19, 0.17),
+        "body_color": (0.33, 0.32, 0.29),
+        "highlight_hex": "#8C7A5C",
+        "accent_hex": "#8C7A5C",
+        "heading_font": CALIBRI_BOLD,
+        "heading_font_size": 13,
+        "heading_align": 0,
+        "body_font": CALIBRI,
+        "body_font_bold": CALIBRI_BOLD,
+        "masthead_style": "minimal-rule",
+    },
+
+    "formal-bulletin": {
+        "name": "Formal Bulletin",
+        "description": "Official and composed: navy border cards, Georgia serif, a boxed masthead.",
+        "cream": (250 / 255, 250 / 255, 247 / 255),
+        "ink": (0.1, 0.12, 0.18),
+        "block_shape": "bordered",
+        "block_bg": (1, 1, 1),
+        "block_radius": 0,
+        "accent_rgb": (0.08, 0.18, 0.38),
+        "heading_color": (0.08, 0.14, 0.3),
+        "body_color": (0.16, 0.18, 0.22),
+        "highlight_hex": "#14275F",
+        "accent_hex": "#14275F",
+        "heading_font": GEORGIA_BOLD,
+        "heading_font_size": 14,
+        "heading_align": 0,
+        "body_font": GEORGIA,
+        "body_font_bold": GEORGIA_BOLD,
+        "masthead_style": "boxed-formal",
+    },
+
+    "pastel-community": {
+        "name": "Pastel Community",
+        "description": "Soft and friendly: peach-bordered cards, rounded corners, a warm welcoming feel.",
+        "cream": (253 / 255, 250 / 255, 246 / 255),
+        "ink": (0.25, 0.2, 0.18),
+        "block_shape": "bordered",
+        "block_bg": (1, 1, 1),
+        "block_radius": 14,
+        "accent_rgb": (0.93, 0.62, 0.49),
+        "heading_color": (0.72, 0.33, 0.2),
+        "body_color": (0.3, 0.25, 0.22),
+        "highlight_hex": "#D16A3F",
+        "accent_hex": "#ED9E7D",
+        "heading_font": TREBUCHET_BOLD,
+        "heading_font_size": 14,
+        "body_font": TREBUCHET,
+        "body_font_bold": TREBUCHET_BOLD,
+        "masthead_style": "tab-underline",
+    },
+
+    "sports-two-tone": {
+        "name": "Sports Two-Tone",
+        "description": "High-contrast navy and red: bold sans headlines built for match-day results.",
+        "cream": (246 / 255, 247 / 255, 249 / 255),
+        "ink": (0.06, 0.08, 0.12),
+        "block_shape": "filled",
+        "block_bg": (0.09, 0.14, 0.26),
+        "block_radius": 0,
+        "heading_color": (1, 1, 1),
+        "body_color": (0.88, 0.9, 0.93),
+        "highlight_hex": "#E8384F",
+        "accent_hex": "#13203F",
+        "heading_font": "Helvetica-Bold",
+        "heading_font_size": 14,
+        "body_font": "Helvetica",
+        "body_font_bold": "Helvetica-Bold",
+        "masthead_style": "bold-banner",
     },
 
 }
