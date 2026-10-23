@@ -551,6 +551,8 @@ def make_numbered_canvas(style: dict):
 
 def load_stories(stories_dir: Path):
     """stories/01-xxx/{heading.txt, note.txt, photos/*.jpg} -> [(heading, note, [Path,...]), ...]"""
+    if not stories_dir.exists():
+        return []
     stories = []
     for folder in sorted(p for p in stories_dir.iterdir() if p.is_dir()):
         heading_file = folder / "heading.txt"

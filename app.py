@@ -52,6 +52,8 @@ def save_config(config: dict) -> None:
 
 def list_story_cards():
     cards = []
+    if not STORIES_DIR.exists():
+        return cards
     for folder in sorted(p for p in STORIES_DIR.iterdir() if p.is_dir()):
         heading_file = folder / "heading.txt"
         note_file = folder / "note.txt"
