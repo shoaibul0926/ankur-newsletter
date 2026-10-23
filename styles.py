@@ -81,7 +81,7 @@ STYLES = {
 
     "broadsheet-editorial": {
         "name": "Broadsheet Editorial",
-        "description": "Classic front-page newspaper: serif type, double rules, no color blocks.",
+        "description": "A real newspaper page: two-column layout, serif type, column rules, no color blocks.",
         "cream": (253 / 255, 252 / 255, 248 / 255),
         "ink": (0.1, 0.1, 0.1),
         "block_shape": "divided",
@@ -91,10 +91,12 @@ STYLES = {
         "highlight_hex": "#8A1F11",
         "accent_hex": "#8A1F11",
         "heading_font": TIMES_BOLD,
-        "heading_font_size": 16,
+        "heading_font_size": 14,
+        "heading_align": 0,
         "body_font": TIMES,
         "body_font_bold": TIMES_BOLD,
         "masthead_style": "nameplate",
+        "columns": 2,
     },
 
     "bold-magazine": {

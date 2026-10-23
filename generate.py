@@ -69,6 +69,7 @@ INNER_TOP = 60
 BLOCK_PAD = 14
 PHOTO_GAP = 6
 BLOCK_GAP = 16
+COLUMN_GAP = 16
 
 
 def _cover_top(style: dict) -> float:
@@ -162,20 +163,29 @@ def format_article(text: str, highlight_hex: str) -> str:
 
 # --- photo grid ---------------------------------------------------------
 
-def photo_rows(photos):
+MIN_PHOTO_CELL_W = 110  # below this, a column is too narrow for a 3-wide photo row
+
+
+def max_photos_per_row(content_w: float) -> int:
+    """How many photos fit per row before each one gets too small to read —
+    matters once a style (e.g. a narrow newspaper column) makes content_w
+    much smaller than a full-width block."""
+    return max(1, min(3, int(content_w // MIN_PHOTO_CELL_W)))
+
+
+def photo_rows(photos, per_row: int = 3):
     n = len(photos)
     if n == 0:
         return []
-    if n <= 3:
+    if n <= per_row:
         return [photos]
-    if n == 4:
-        return [photos[0:2], photos[2:4]]
-    if n == 5:
-        return [photos[0:3], photos[3:5]]
     rows, i = [], 0
     while i < n:
-        rows.append(photos[i:i + 3])
-        i += 3
+        rows.append(photos[i:i + per_row])
+        i += per_row
+    # avoid a lonely single photo stranded on its own row, where possible
+    if len(rows[-1]) == 1 and len(rows) > 1 and len(rows[-2]) > 1:
+        rows[-1].insert(0, rows[-2].pop())
     return rows
 
 
@@ -229,7 +239,7 @@ class StoryBlock(Flowable):
         heading_flow = Paragraph(_escape(self.heading_text), heading_style) if self.heading_text else None
         heading_h = heading_flow.wrap(content_w, avail_h)[1] if heading_flow else 0
 
-        rows = photo_rows(self.photo_paths)
+        rows = photo_rows(self.photo_paths, max_photos_per_row(content_w))
         row_geom = []
         photos_h = 0
         for row in rows:
@@ -470,11 +480,28 @@ def _hex_rgb(hex_color: str):
     return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
 
 
+def _draw_column_rules(c, style, top_margin):
+    """A thin vertical rule between each pair of newspaper-style columns —
+    drawn once per page as background, independent of story content."""
+    n_cols = style.get("columns", 1)
+    if n_cols <= 1:
+        return
+    total_w = PAGE_W - MARGIN_L - MARGIN_R
+    col_w = (total_w - COLUMN_GAP * (n_cols - 1)) / n_cols
+    c.setStrokeColorRGB(*style["ink"])
+    c.setLineWidth(0.5)
+    y_top = PAGE_H - top_margin
+    for i in range(1, n_cols):
+        x = MARGIN_L + i * col_w + (i - 0.5) * COLUMN_GAP
+        c.line(x, MARGIN_BOTTOM, x, y_top)
+
+
 def on_cover_page(c, doc):
     style = doc.style
     c.saveState()
     _fill_background(c, style)
     _MASTHEAD_DRAWERS.get(style["masthead_style"], _draw_masthead_bold_banner)(c, doc, style)
+    _draw_column_rules(c, style, _cover_top(style))
     _draw_footer(c, doc, style)
     c.restoreState()
 
@@ -489,6 +516,7 @@ def on_inner_page(c, doc):
     c.drawRightString(PAGE_W - MARGIN_R, PAGE_H - 40, doc.title_big)
     c.setLineWidth(2)
     c.line(MARGIN_L, PAGE_H - INNER_TOP + 8, PAGE_W - MARGIN_R, PAGE_H - INNER_TOP + 8)
+    _draw_column_rules(c, style, INNER_TOP)
     _draw_footer(c, doc, style)
     c.restoreState()
 
@@ -578,14 +606,25 @@ def render_pdf(config: dict, stories: list, output_path: Path) -> Path:
     # the _is_fresh_page() comparison in StoryBlock.wrap() — zero it out
     # so the frame's real usable area matches those constants exactly.
     frame_kwargs = dict(leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
-    cover_frame = Frame(MARGIN_L, MARGIN_BOTTOM, PAGE_W - MARGIN_L - MARGIN_R,
-                         PAGE_H - cover_top - MARGIN_BOTTOM, id="cover", **frame_kwargs)
-    inner_frame = Frame(MARGIN_L, MARGIN_BOTTOM, PAGE_W - MARGIN_L - MARGIN_R,
-                         PAGE_H - INNER_TOP - MARGIN_BOTTOM, id="inner", **frame_kwargs)
+
+    def build_frames(top_margin, id_prefix):
+        n_cols = style.get("columns", 1)
+        frame_h = PAGE_H - top_margin - MARGIN_BOTTOM
+        if n_cols <= 1:
+            return [Frame(MARGIN_L, MARGIN_BOTTOM, PAGE_W - MARGIN_L - MARGIN_R, frame_h,
+                           id=id_prefix, **frame_kwargs)]
+        total_w = PAGE_W - MARGIN_L - MARGIN_R
+        col_w = (total_w - COLUMN_GAP * (n_cols - 1)) / n_cols
+        # reportlab flows a single flowable stream across frames in list
+        # order, moving to the next frame when one fills and to a new page
+        # once all frames on it are full — exactly newspaper column flow,
+        # no custom balancing logic needed.
+        return [Frame(MARGIN_L + i * (col_w + COLUMN_GAP), MARGIN_BOTTOM, col_w, frame_h,
+                       id=f"{id_prefix}{i}", **frame_kwargs) for i in range(n_cols)]
 
     doc.addPageTemplates([
-        PageTemplate(id="Cover", frames=[cover_frame], onPage=on_cover_page),
-        PageTemplate(id="Inner", frames=[inner_frame], onPage=on_inner_page),
+        PageTemplate(id="Cover", frames=build_frames(cover_top, "cover"), onPage=on_cover_page),
+        PageTemplate(id="Inner", frames=build_frames(INNER_TOP, "inner"), onPage=on_inner_page),
     ])
 
     flow = [NextPageTemplate("Inner")]
