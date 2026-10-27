@@ -123,6 +123,28 @@ def _render_markup(text: str, highlight_hex: str) -> str:
     return "".join(out)
 
 
+def markup_tokens(text: str) -> list:
+    """Split text on the same manual markup _render_markup() understands,
+    into (plain_text, kind) pairs with kind in {None, "bold", "highlight"}.
+    Lets other renderers (Word export, poster pull-quotes) honor the same
+    ++highlight++ / **bold** markup as the PDF, and strip it to plain text
+    when they just need the words, without duplicating _MARKUP_RE.
+    """
+    out = []
+    pos = 0
+    for m in _MARKUP_RE.finditer(text):
+        if m.start() > pos:
+            out.append((text[pos:m.start()], None))
+        if m.group(1) is not None:
+            out.append((m.group(1), "bold"))
+        else:
+            out.append((m.group(2), "highlight"))
+        pos = m.end()
+    if pos < len(text):
+        out.append((text[pos:], None))
+    return out
+
+
 def _lead_sentence(text: str) -> str:
     """The first real sentence, skipping false ends after 'Mr.' / initials."""
     for m in _SENTENCE_END_RE.finditer(text):

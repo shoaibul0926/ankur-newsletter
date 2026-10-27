@@ -30,6 +30,7 @@ from pathlib import Path
 from flask import Flask, abort, flash, redirect, render_template, request, send_file, url_for
 
 import github_storage as gh
+from export_formats import render_docx, render_poster, render_website_html, write_blog_post
 from extract import extract_deck, write_stories
 from generate import BASE_DIR, load_stories, render_pdf
 from styles import DEFAULT_STYLE_ID, STYLES
@@ -117,6 +118,36 @@ def current_stories_for_generate(tmp_dir: Path):
         if s["heading"] or s["note"] or photo_paths:
             stories.append((s["heading"], s["note"], photo_paths))
     return stories
+
+
+def _story_by_name(name: str, tmp_dir: Path):
+    """One story's full (heading, note, photo_paths) tuple by its folder/
+    record name -- current_stories_for_generate() returns the whole list
+    without names attached, so the poster route (which needs exactly one,
+    picked from a dropdown) looks it up this way instead."""
+    if not using_github():
+        folder = STORIES_DIR / name
+        if not folder.is_dir():
+            return None
+        heading_file, note_file, photos_dir = folder / "heading.txt", folder / "note.txt", folder / "photos"
+        heading = heading_file.read_text(encoding="utf-8").strip() if heading_file.exists() else ""
+        note = note_file.read_text(encoding="utf-8").strip() if note_file.exists() else ""
+        photos = sorted(p for p in photos_dir.iterdir() if p.suffix.lower() in PHOTO_EXTS) if photos_dir.exists() else []
+        return (heading, note, photos)
+
+    for s in gh.list_stories():
+        if s["name"] != name:
+            continue
+        photo_paths = []
+        if s["photos"]:
+            story_dir = tmp_dir / s["name"]
+            story_dir.mkdir(parents=True, exist_ok=True)
+            for filename, sha in s["photos"]:
+                dest = story_dir / filename
+                dest.write_bytes(gh.get_blob(sha))
+                photo_paths.append(dest)
+        return (s["heading"], s["note"], photo_paths)
+    return None
 
 
 @app.route("/")
@@ -280,6 +311,66 @@ def generate():
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         return response
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@app.route("/generate-docx")
+def generate_docx():
+    tmp_dir = Path(tempfile.mkdtemp())
+    try:
+        stories = current_stories_for_generate(tmp_dir)
+        if not stories:
+            abort(400, "No stories yet — add one by hand or upload a deck first.")
+        output_path = (Path(tempfile.gettempdir()) / f"newsletter_{uuid.uuid4().hex[:8]}.docx"
+                        if using_github() else OUTPUT_DIR / "newsletter.docx")
+        render_docx(load_config(), stories, output_path)
+        return send_file(output_path, as_attachment=True, download_name="newsletter.docx")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@app.route("/export-website")
+def export_website():
+    tmp_dir = Path(tempfile.mkdtemp())
+    try:
+        stories = current_stories_for_generate(tmp_dir)
+        if not stories:
+            abort(400, "No stories yet — add one by hand or upload a deck first.")
+        output_path = Path(tempfile.gettempdir()) / f"newsletter_site_{uuid.uuid4().hex[:8]}.html"
+        render_website_html(load_config(), stories, output_path)
+        return send_file(output_path, as_attachment=True, download_name="newsletter.html", mimetype="text/html")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@app.route("/blog-post")
+def blog_post():
+    tmp_dir = Path(tempfile.mkdtemp())
+    try:
+        stories = current_stories_for_generate(tmp_dir)
+        if not stories:
+            abort(400, "No stories yet — add one by hand or upload a deck first.")
+        output_path = Path(tempfile.gettempdir()) / f"newsletter_blog_{uuid.uuid4().hex[:8]}.md"
+        write_blog_post(load_config(), stories, output_path)
+        return send_file(output_path, as_attachment=True, download_name="blog-post.md", mimetype="text/markdown")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@app.route("/poster")
+def poster():
+    name = request.args.get("story", "")
+    if not name or not re.match(r"^[\w\-]+$", name):
+        abort(400, "Pick a story to make a poster from.")
+    tmp_dir = Path(tempfile.mkdtemp())
+    try:
+        story = _story_by_name(name, tmp_dir)
+        if story is None:
+            abort(404, "That story wasn't found — it may have been removed.")
+        output_path = Path(tempfile.gettempdir()) / f"poster_{uuid.uuid4().hex[:8]}.png"
+        render_poster(load_config(), story, output_path)
+        return send_file(output_path, as_attachment=True, download_name=f"poster-{name}.png", mimetype="image/png")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
